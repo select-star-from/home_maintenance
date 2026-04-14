@@ -62,7 +62,12 @@
                     "edit": "Bearbeiten",
                     "remove": "Entfernen"
                 },
-                "confirm_remove": "Sind Sie sicher, dass Sie diese Aufgabe entfernen möchten?"
+                "confirm_remove": "Sind Sie sicher, dass Sie diese Aufgabe entfernen möchten?",
+                "confirm_complete": "\"{title}\" als erledigt markieren? Zuletzt durchgeführt wird auf heute gesetzt und das nächste Fälligkeitsdatum anhand des Intervalls neu berechnet.",
+                "alerts": {
+                    "complete_success": "\"{title}\" wurde als erledigt markiert. Das nächste Fälligkeitsdatum wurde neu berechnet.",
+                    "complete_error": "Aufgabe konnte nicht als erledigt markiert werden. Details siehe Konsole."
+                }
             }
         },
         "dialog": {

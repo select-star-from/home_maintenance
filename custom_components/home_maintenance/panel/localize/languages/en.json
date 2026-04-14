@@ -62,7 +62,12 @@
                     "edit": "Edit",
                     "remove": "Remove"
                 },
-                "confirm_remove": "Are you sure you want to remove this task?"
+                "confirm_remove": "Are you sure you want to remove this task?",
+                "confirm_complete": "Mark \"{title}\" as complete? Last performed will be set to today and next due date will be recalculated from the interval.",
+                "alerts": {
+                    "complete_success": "\"{title}\" marked complete. Next due date was recalculated.",
+                    "complete_error": "Failed to mark task complete. See console for details."
+                }
             }
         },
         "dialog": {

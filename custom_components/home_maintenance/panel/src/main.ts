@@ -7,7 +7,7 @@ import {
 import { LitElement, html, nothing } from "lit";
 import { property, state, query } from "lit/decorators.js";
 import type { HomeAssistant } from "custom-card-helpers";
-import { formatDateNumeric } from "custom-card-helpers";
+import { fireEvent, formatDateNumeric } from "custom-card-helpers";
 
 import { localize } from '../localize/localize';
 import { VERSION } from "./const";
@@ -580,12 +580,24 @@ export class HomeMaintenancePanel extends LitElement {
     };
 
     private async _handleCompleteTaskClick(id: string) {
+        const task = this.tasks.find((entry) => entry.id === id);
+        const title = task?.title ?? id;
+        const msg = localize('panel.cards.current.confirm_complete', this.hass!.language, '{title}', title);
+
+        if (!confirm(msg)) return;
+
         try {
             await completeTask(this.hass!, id);
             await this.loadData();
+            this._showToast(localize('panel.cards.current.alerts.complete_success', this.hass!.language, '{title}', title));
         } catch (e) {
             console.error("Failed to complete task:", e);
+            this._showToast(localize('panel.cards.current.alerts.complete_error', this.hass!.language));
         }
+    }
+
+    private _showToast(message: string) {
+        fireEvent(this, "hass-notification" as any, { message });
     }
 
     private async _handleOpenEditDialogClick(id: string) {
