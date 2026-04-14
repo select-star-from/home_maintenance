@@ -60,6 +60,12 @@ export class HomeMaintenancePanel extends LitElement {
         tag: "",
     };
 
+    // Complete confirmation dialog state
+    @state() private _confirmingCompleteTaskId: string | null = null;
+    private get _confirmingCompleteTask(): Task | undefined {
+        return this.tasks.find((t) => t.id === this._confirmingCompleteTaskId);
+    }
+
     // Shared overflow menu state
     @state() private _selectedTaskId: string | null = null;
     @query("#actions-menu") private _actionsMenu?: any;
@@ -427,6 +433,7 @@ export class HomeMaintenancePanel extends LitElement {
             </div>
 
             ${this.renderEditDialog()}
+            ${this.renderCompleteConfirmDialog()}
             ${this.renderActionsMenu()}
         `;
     }
@@ -579,13 +586,15 @@ export class HomeMaintenancePanel extends LitElement {
         }
     };
 
-    private async _handleCompleteTaskClick(id: string) {
-        const task = this.tasks.find((entry) => entry.id === id);
-        const title = task?.title ?? id;
-        const msg = localize('panel.cards.current.confirm_complete', this.hass!.language, '{title}', title);
+    private _handleCompleteTaskClick(id: string) {
+        this._confirmingCompleteTaskId = id;
+    }
 
-        if (!confirm(msg)) return;
-
+    private async _handleConfirmComplete() {
+        const id = this._confirmingCompleteTaskId;
+        const title = this._confirmingCompleteTask?.title ?? id ?? '';
+        this._confirmingCompleteTaskId = null;
+        if (!id) return;
         try {
             await completeTask(this.hass!, id);
             await this.loadData();
@@ -594,6 +603,37 @@ export class HomeMaintenancePanel extends LitElement {
             console.error("Failed to complete task:", e);
             this._showToast(localize('panel.cards.current.alerts.complete_error', this.hass!.language));
         }
+    }
+
+    renderCompleteConfirmDialog() {
+        if (!this.hass || !this._confirmingCompleteTaskId) return html``;
+
+        const task = this._confirmingCompleteTask;
+        const title = task?.title ?? this._confirmingCompleteTaskId;
+        const intervalLabel = task
+            ? `${task.interval_value} ${localize(`intervals.${task.interval_value === 1 ? task.interval_type.slice(0, -1) : task.interval_type}`, this.hass.language)}`
+            : '';
+
+        return html`
+            <ha-dialog
+                open
+                heading="${localize('panel.dialog.confirm_complete.title', this.hass.language)}"
+                @closed=${() => (this._confirmingCompleteTaskId = null)}
+            >
+                <p>
+                    ${localize('panel.dialog.confirm_complete.message', this.hass.language,
+                        '{title}', title,
+                        '{interval}', intervalLabel
+                    )}
+                </p>
+                <ha-button appearance="plain" slot="secondaryAction" @click=${() => (this._confirmingCompleteTaskId = null)}>
+                    ${localize('panel.dialog.confirm_complete.actions.cancel', this.hass.language)}
+                </ha-button>
+                <ha-button appearance="accent" slot="primaryAction" @click=${this._handleConfirmComplete.bind(this)}>
+                    ${localize('panel.dialog.confirm_complete.actions.confirm', this.hass.language)}
+                </ha-button>
+            </ha-dialog>
+        `;
     }
 
     private _showToast(message: string) {

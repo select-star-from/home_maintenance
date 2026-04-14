@@ -71,6 +71,14 @@
             }
         },
         "dialog": {
+            "confirm_complete": {
+                "title": "Aufgabe als erledigt markieren",
+                "message": "\"{title}\" als erledigt markieren? Zuletzt durchgeführt wird auf heute zurückgesetzt und das nächste Fälligkeitsdatum wird basierend auf dem Intervall von {interval} neu berechnet.",
+                "actions": {
+                    "cancel": "Abbrechen",
+                    "confirm": "Als erledigt markieren"
+                }
+            },
             "edit_task": {
                 "title": "Aufgabe bearbeiten",
                 "fields": {

@@ -71,6 +71,14 @@
             }
         },
         "dialog": {
+            "confirm_complete": {
+                "title": "Mark Task Complete",
+                "message": "Mark \"{title}\" as complete? Last performed will be reset to today and the next due date will be recalculated based on the {interval} interval.",
+                "actions": {
+                    "cancel": "Cancel",
+                    "confirm": "Mark Complete"
+                }
+            },
             "edit_task": {
                 "title": "Edit Task",
                 "fields": {
