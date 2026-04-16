@@ -176,7 +176,7 @@ export class HomeMaintenancePanel extends LitElement {
                 showNarrow: true,
                 moveable: false,
                 hideable: false,
-                type: "overflow-menu",
+                type: "overflow",
                 template: (task: Task) => html`
                     <ha-icon-button
                         @click=${(e: Event) => this._handleShowMenu(task.id, e)}
