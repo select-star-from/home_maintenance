@@ -15,7 +15,7 @@ _LOGGER = logging.getLogger(__name__)
 
 STORAGE_KEY = f"{const.DOMAIN}.storage"
 STORAGE_VERSION_MAJOR = 1
-STORAGE_VERSION_MINOR = 1
+STORAGE_VERSION_MINOR = 2
 
 
 @attr.s(slots=True)
@@ -29,6 +29,7 @@ class HomeMaintenanceTask:
     last_performed: str = attr.ib()
     tag_id: str | None = attr.ib(default=None)
     icon: str | None = attr.ib(default=None)
+    group_id: str | None = attr.ib(default=None)
 
 
 class TaskStore:
@@ -44,6 +45,15 @@ class TaskStore:
             minor_version=STORAGE_VERSION_MINOR,
         )
         self._tasks: dict[str, HomeMaintenanceTask] = {}
+        self._groups: set[str] = set()
+
+    @staticmethod
+    def _normalize_group_id(group_id: str | None) -> str | None:
+        """Normalize a group id to a canonical stored value."""
+        if group_id is None:
+            return None
+        normalized = group_id.strip()
+        return normalized or None
 
     async def async_load(self) -> None:
         """Load tasks from storage."""
@@ -51,9 +61,30 @@ class TaskStore:
         if data is None:
             return
 
+        if isinstance(data, list):
+            task_items = data
+            group_items: list[str] = []
+        else:
+            task_items = data.get("tasks", [])
+            group_items = data.get("groups", [])
+
         self._tasks = {
-            task_data["id"]: HomeMaintenanceTask(**task_data) for task_data in data
+            task_data["id"]: HomeMaintenanceTask(**task_data) for task_data in task_items
         }
+
+        stored_groups = {
+            group
+            for group in (self._normalize_group_id(g) for g in group_items)
+            if group is not None
+        }
+        derived_groups = {
+            group
+            for group in (
+                self._normalize_group_id(task.group_id) for task in self._tasks.values()
+            )
+            if group is not None
+        }
+        self._groups = stored_groups | derived_groups
 
     def get_all(self) -> list[dict]:
         """Get all tasks."""
@@ -62,6 +93,68 @@ class TaskStore:
     def get(self, task_id: str) -> dict:
         """Get single task."""
         return attr.asdict(self._tasks.get(task_id))
+
+    def get_groups(self) -> list[str]:
+        """Get all configured group names."""
+        return sorted(self._groups)
+
+    def create_group(self, group_id: str) -> None:
+        """Create a group if it does not already exist."""
+        normalized = self._normalize_group_id(group_id)
+        if not normalized:
+            msg = "Group name is required."
+            raise RuntimeError(msg)
+
+        self._groups.add(normalized)
+        self._save()
+
+    def rename_group(self, old_group_id: str, new_group_id: str) -> None:
+        """Rename a group and reassign all member tasks."""
+        old_normalized = self._normalize_group_id(old_group_id)
+        new_normalized = self._normalize_group_id(new_group_id)
+
+        if not old_normalized or not new_normalized:
+            msg = "Both old and new group names are required."
+            raise RuntimeError(msg)
+
+        if old_normalized == new_normalized:
+            return
+
+        self._groups.discard(old_normalized)
+        self._groups.add(new_normalized)
+
+        for task_id, task in self._tasks.items():
+            if self._normalize_group_id(task.group_id) != old_normalized:
+                continue
+
+            task.group_id = new_normalized
+            entity = self.hass.data[const.DOMAIN]["entities"].get(task_id)
+            if entity is not None:
+                entity.task["group_id"] = new_normalized
+                self.hass.async_create_task(entity.async_update_ha_state(force_refresh=True))
+
+        self._save()
+
+    def delete_group(self, group_id: str) -> None:
+        """Delete a group and reassign member tasks to ungrouped."""
+        normalized = self._normalize_group_id(group_id)
+        if not normalized:
+            msg = "Group name is required."
+            raise RuntimeError(msg)
+
+        self._groups.discard(normalized)
+
+        for task_id, task in self._tasks.items():
+            if self._normalize_group_id(task.group_id) != normalized:
+                continue
+
+            task.group_id = None
+            entity = self.hass.data[const.DOMAIN]["entities"].get(task_id)
+            if entity is not None:
+                entity.task["group_id"] = None
+                self.hass.async_create_task(entity.async_update_ha_state(force_refresh=True))
+
+        self._save()
 
     def _get_tag_uuids(self) -> dict[str, str]:
         """Return a mapping of all task's tag friendly IDs into tag UUIDs."""
@@ -117,6 +210,9 @@ class TaskStore:
             self.hass, attr.asdict(task), device_id, labels=labels
         )
         add_entities([entity])
+        task.group_id = self._normalize_group_id(task.group_id)
+        if task.group_id:
+            self._groups.add(task.group_id)
         self._tasks[task.id] = task
         self.hass.data[const.DOMAIN]["entities"][task.id] = entity
         self._save()
@@ -167,6 +263,13 @@ class TaskStore:
             task.tag_id = tag_id if tag_id else None
             entity.task["tag_id"] = tag_id if tag_id else None
 
+        if "group_id" in updated:
+            group_id = self._normalize_group_id(updated["group_id"])
+            task.group_id = group_id
+            entity.task["group_id"] = group_id
+            if group_id:
+                self._groups.add(group_id)
+
         if "labels" in updated:
             registry = entity_registry.async_get(self.hass)
             if registry.async_get(entity.entity_id):
@@ -203,5 +306,10 @@ class TaskStore:
     def _save(self) -> None:
         """Save tasks in the background."""
         self.hass.async_create_task(
-            self._store.async_save([attr.asdict(task) for task in self._tasks.values()])
+            self._store.async_save(
+                {
+                    "tasks": [attr.asdict(task) for task in self._tasks.values()],
+                    "groups": sorted(self._groups),
+                }
+            )
         )

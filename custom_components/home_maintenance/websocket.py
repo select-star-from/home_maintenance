@@ -66,6 +66,7 @@ def websocket_add_task(
         last_performed=last_performed,
         tag_id=msg.get("tag_id"),
         icon=msg.get("icon"),
+        group_id=msg.get("group_id") or None,
     )
 
     labels = msg.get("labels", [])
@@ -82,25 +83,67 @@ def websocket_update_task(
     task_id = msg["task_id"]
     updates = msg.get("updates", {})
 
-    last_str = updates["last_performed"]
-    if last_str:
-        parsed = dt_util.parse_datetime(last_str)
-        if parsed is None:
-            connection.send_error(
-                msg["id"], "invalid_date", f"Could not parse date: {last_str}"
+    if "last_performed" in updates:
+        last_str = updates["last_performed"]
+        if last_str:
+            parsed = dt_util.parse_datetime(last_str)
+            if parsed is None:
+                connection.send_error(
+                    msg["id"], "invalid_date", f"Could not parse date: {last_str}"
+                )
+                return
+            parsed_local = dt_util.as_local(parsed)
+            last_performed = parsed_local.replace(
+                hour=0, minute=0, second=0, microsecond=0
+            ).isoformat()
+        else:
+            last_performed = (
+                dt_util.now()
+                .replace(hour=0, minute=0, second=0, microsecond=0)
+                .isoformat()
             )
-            return
-        parsed_local = dt_util.as_local(parsed)
-        last_performed = parsed_local.replace(
-            hour=0, minute=0, second=0, microsecond=0
-        ).isoformat()
-    else:
-        last_performed = (
-            dt_util.now().replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
-        )
-    updates["last_performed"] = last_performed
+        updates["last_performed"] = last_performed
 
     store.update_task(task_id, updates)
+    connection.send_result(msg["id"], {"success": True})
+
+
+@callback
+def websocket_get_groups(
+    hass: HomeAssistant, connection: connection.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Get all groups."""
+    store = hass.data[DOMAIN].get("store")
+    connection.send_result(msg["id"], store.get_groups())
+
+
+@callback
+def websocket_create_group(
+    hass: HomeAssistant, connection: connection.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Create a group."""
+    store = hass.data[DOMAIN].get("store")
+    store.create_group(msg["group_id"])
+    connection.send_result(msg["id"], {"success": True})
+
+
+@callback
+def websocket_rename_group(
+    hass: HomeAssistant, connection: connection.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Rename a group."""
+    store = hass.data[DOMAIN].get("store")
+    store.rename_group(msg["old_group_id"], msg["new_group_id"])
+    connection.send_result(msg["id"], {"success": True})
+
+
+@callback
+def websocket_delete_group(
+    hass: HomeAssistant, connection: connection.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Delete a group and move its tasks to ungrouped."""
+    store = hass.data[DOMAIN].get("store")
+    store.delete_group(msg["group_id"])
     connection.send_result(msg["id"], {"success": True})
 
 
@@ -186,6 +229,7 @@ async def async_register_websockets(hass: HomeAssistant) -> None:
                 vol.Optional("last_performed"): str,
                 vol.Optional("tag_id"): str,
                 vol.Optional("icon"): str,
+                vol.Optional("group_id"): vol.Any(str, None),
                 vol.Optional("labels"): [str],
             }
         ),
@@ -235,6 +279,54 @@ async def async_register_websockets(hass: HomeAssistant) -> None:
         messages.BASE_COMMAND_MESSAGE_SCHEMA.extend(
             {
                 vol.Required("type"): "home_maintenance/get_config",
+            }
+        ),
+    )
+
+    websocket_api.async_register_command(
+        hass,
+        "home_maintenance/get_groups",
+        websocket_get_groups,
+        messages.BASE_COMMAND_MESSAGE_SCHEMA.extend(
+            {
+                vol.Required("type"): "home_maintenance/get_groups",
+            }
+        ),
+    )
+
+    websocket_api.async_register_command(
+        hass,
+        "home_maintenance/create_group",
+        websocket_create_group,
+        messages.BASE_COMMAND_MESSAGE_SCHEMA.extend(
+            {
+                vol.Required("type"): "home_maintenance/create_group",
+                vol.Required("group_id"): str,
+            }
+        ),
+    )
+
+    websocket_api.async_register_command(
+        hass,
+        "home_maintenance/rename_group",
+        websocket_rename_group,
+        messages.BASE_COMMAND_MESSAGE_SCHEMA.extend(
+            {
+                vol.Required("type"): "home_maintenance/rename_group",
+                vol.Required("old_group_id"): str,
+                vol.Required("new_group_id"): str,
+            }
+        ),
+    )
+
+    websocket_api.async_register_command(
+        hass,
+        "home_maintenance/delete_group",
+        websocket_delete_group,
+        messages.BASE_COMMAND_MESSAGE_SCHEMA.extend(
+            {
+                vol.Required("type"): "home_maintenance/delete_group",
+                vol.Required("group_id"): str,
             }
         ),
     )
