@@ -21,6 +21,11 @@ export const loadTasks = (hass: HomeAssistant): Promise<Task[]> =>
         type: 'home_maintenance/get_tasks',
     });
 
+export const loadGroups = (hass: HomeAssistant): Promise<string[]> =>
+    hass.callWS({
+        type: 'home_maintenance/get_groups',
+    });
+
 export const loadTask = (hass: HomeAssistant, id: string): Promise<Task> =>
     hass.callWS({
         type: 'home_maintenance/get_task',
@@ -50,6 +55,25 @@ export const updateTask = (hass: HomeAssistant, payload: Record<string, any>): P
         type: 'home_maintenance/update_task',
         ...payload,
     })
+
+export const createGroup = (hass: HomeAssistant, groupId: string): Promise<void> =>
+    hass.callWS({
+        type: 'home_maintenance/create_group',
+        group_id: groupId,
+    });
+
+export const renameGroup = (hass: HomeAssistant, oldGroupId: string, newGroupId: string): Promise<void> =>
+    hass.callWS({
+        type: 'home_maintenance/rename_group',
+        old_group_id: oldGroupId,
+        new_group_id: newGroupId,
+    });
+
+export const deleteGroup = (hass: HomeAssistant, groupId: string): Promise<void> =>
+    hass.callWS({
+        type: 'home_maintenance/delete_group',
+        group_id: groupId,
+    });
 
 export const getConfig = (hass: HomeAssistant): Promise<IntegrationConfig> =>
     hass.callWS({

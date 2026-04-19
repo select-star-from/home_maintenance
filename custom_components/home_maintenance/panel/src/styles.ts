@@ -143,6 +143,64 @@ export const commonStyle = css`
         --mdc-dialog-min-width: 600px;
     }
 
+    .group-section {
+        margin-bottom: 16px;
+    }
+
+    .group-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 4px;
+        border-bottom: 1px solid var(--divider-color);
+        margin-bottom: 8px;
+    }
+
+    .group-title {
+        font-weight: 600;
+    }
+
+    .group-count {
+        font-size: 12px;
+        color: var(--secondary-text-color);
+        background: var(--secondary-background-color);
+        border-radius: 999px;
+        padding: 2px 8px;
+    }
+
+    .group-management-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 10px;
+        flex-wrap: wrap;
+    }
+
+    .group-management-row ha-textfield,
+    .group-management-row ha-select {
+        min-width: 180px;
+        flex: 1;
+    }
+
+    .group-list {
+        border-top: 1px solid var(--divider-color);
+        padding-top: 8px;
+        margin-top: 8px;
+    }
+
+    .group-list-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        min-height: 36px;
+        border-bottom: 1px solid var(--divider-color);
+    }
+
+    .secondary {
+        color: var(--secondary-text-color);
+        font-size: 0.95em;
+    }
+
     @media (max-width: 600px) {
         ha-dialog {
         --mdc-dialog-min-width: auto;

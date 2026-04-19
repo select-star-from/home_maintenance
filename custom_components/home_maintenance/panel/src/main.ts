@@ -3,6 +3,7 @@ import {
     mdiDelete,
     mdiPencil,
     mdiDotsHorizontal,
+    mdiFolderMove,
 } from "@mdi/js";
 import { LitElement, html, nothing } from "lit";
 import { property, state, query } from "lit/decorators.js";
@@ -14,7 +15,7 @@ import { VERSION } from "./const";
 import { loadConfigDashboard } from "./helpers";
 import { commonStyle } from './styles'
 import { EntityRegistryEntry, IntegrationConfig, IntervalType, INTERVAL_TYPES, getIntervalTypeLabels, Label, Task, Tag } from './types';
-import { completeTask, getConfig, loadLabelRegistry, loadRegistryEntries, loadTags, loadTask, loadTasks, removeTask, saveTask, updateTask } from './data/websockets';
+import { completeTask, createGroup, deleteGroup, getConfig, loadGroups, loadLabelRegistry, loadRegistryEntries, loadTags, loadTask, loadTasks, removeTask, renameGroup, saveTask, updateTask } from './data/websockets';
 
 interface TaskFormData {
     title: string;
@@ -24,6 +25,7 @@ interface TaskFormData {
     icon: string;
     label: string[];
     tag: string;
+    group_id: string;
 }
 
 export class HomeMaintenancePanel extends LitElement {
@@ -35,6 +37,12 @@ export class HomeMaintenancePanel extends LitElement {
     @state() private config: IntegrationConfig | null = null;
     @state() private registry: EntityRegistryEntry[] = [];
     @state() private labelRegistry: Label[] = [];
+    @state() private groups: string[] = [];
+    @state() private _newGroupName = "";
+    @state() private _renameGroupFrom = "";
+    @state() private _renameGroupTo = "";
+    @state() private _movingTaskId: string | null = null;
+    @state() private _moveTargetGroupId = "";
 
     // New Task form state
     @state() private _formData: TaskFormData = {
@@ -45,6 +53,7 @@ export class HomeMaintenancePanel extends LitElement {
         icon: "",
         label: [],
         tag: "",
+        group_id: "",
     };
     private _advancedOpen: boolean = false;
 
@@ -58,6 +67,7 @@ export class HomeMaintenancePanel extends LitElement {
         icon: "",
         label: [],
         tag: "",
+        group_id: "",
     };
 
     // Complete confirmation dialog state
@@ -69,6 +79,29 @@ export class HomeMaintenancePanel extends LitElement {
     // Shared overflow menu state
     @state() private _selectedTaskId: string | null = null;
     @query("#actions-menu") private _actionsMenu?: any;
+
+    private get _groupValues() {
+        const taskGroups = this.tasks
+            .map((task) => task.group_id?.trim() || "")
+            .filter((groupId) => groupId !== "");
+        const combined = new Set<string>([...this.groups, ...taskGroups]);
+        return [...combined].sort((a, b) => a.localeCompare(b));
+    }
+
+    private get _groupOptions() {
+        const sortedGroups = this._groupValues;
+
+        return [
+            {
+                value: "",
+                label: "Ungrouped",
+            },
+            ...sortedGroups.map((groupId) => ({
+                value: groupId,
+                label: groupId,
+            })),
+        ];
+    }
 
     private get _columns() {
         return {
@@ -198,7 +231,11 @@ export class HomeMaintenancePanel extends LitElement {
     }
 
     private get _rows() {
-        return this.tasks.map((task: Task) => ({
+        return this._rowsForTasks(this.tasks);
+    }
+
+    private _rowsForTasks(tasks: Task[]) {
+        return tasks.map((task: Task) => ({
             icon: task.icon,
             id: task.id,
             title: task.title,
@@ -242,6 +279,35 @@ export class HomeMaintenancePanel extends LitElement {
         }));
     }
 
+    private get _taskGroups() {
+        const grouped = new Map<string, Task[]>();
+
+        this.tasks.forEach((task) => {
+            const groupId = task.group_id?.trim() || "";
+            const existing = grouped.get(groupId) ?? [];
+            existing.push(task);
+            grouped.set(groupId, existing);
+        });
+
+        this._groupValues.forEach((groupId) => {
+            if (!grouped.has(groupId)) {
+                grouped.set(groupId, []);
+            }
+        });
+
+        const groups = [...grouped.entries()].sort(([a], [b]) => {
+            if (a === "") return -1;
+            if (b === "") return 1;
+            return a.localeCompare(b);
+        });
+
+        return groups.map(([groupId, tasks]) => ({
+            groupId,
+            title: groupId || "Ungrouped",
+            tasks,
+        }));
+    }
+
     private get _basicSchema() {
         return [
             { name: "title", required: true, selector: { text: {} }, },
@@ -256,6 +322,16 @@ export class HomeMaintenancePanel extends LitElement {
                             label: getIntervalTypeLabels(this.hass!.language)[type],
                         })),
                         mode: "dropdown"
+                    },
+                },
+            },
+            {
+                name: "group_id",
+                selector: {
+                    select: {
+                        options: this._groupOptions,
+                        mode: "dropdown",
+                        custom_value: true,
                     },
                 },
             },
@@ -288,6 +364,16 @@ export class HomeMaintenancePanel extends LitElement {
                 },
             },
             { type: "constant", name: localize('panel.dialog.edit_task.sections.optional', this.hass!.language), disabled: true },
+            {
+                name: "group_id",
+                selector: {
+                    select: {
+                        options: this._groupOptions,
+                        mode: "dropdown",
+                        custom_value: true,
+                    },
+                },
+            },
             { name: "last_performed", selector: { date: {} }, },
             { name: "icon", selector: { icon: {} }, },
             { name: "label", selector: { label: { multiple: true } }, },
@@ -331,6 +417,7 @@ export class HomeMaintenancePanel extends LitElement {
         await loadConfigDashboard();
         this.tags = await loadTags(this.hass!);
         this.tasks = await loadTasks(this.hass!);
+        this.groups = await loadGroups(this.hass!);
         this.config = await getConfig(this.hass!);
         this.registry = await loadRegistryEntries(this.hass!);
         this.labelRegistry = await loadLabelRegistry(this.hass!);
@@ -345,6 +432,7 @@ export class HomeMaintenancePanel extends LitElement {
             icon: "",
             label: [],
             tag: "",
+            group_id: "",
         };
 
         this.tasks = await loadTasks(this.hass!);
@@ -359,6 +447,7 @@ export class HomeMaintenancePanel extends LitElement {
             icon: "",
             label: [],
             tag: "",
+            group_id: "",
         };
     }
 
@@ -430,11 +519,78 @@ export class HomeMaintenancePanel extends LitElement {
                 >
                     <div class="card-content">${this.renderTasks()}</div>
                 </ha-card>
+
+                <ha-card header="Groups" class="card-new">
+                    <div class="card-content">${this.renderGroupManagement()}</div>
+                </ha-card>
             </div>
 
             ${this.renderEditDialog()}
             ${this.renderCompleteConfirmDialog()}
+            ${this.renderMoveDialog()}
             ${this.renderActionsMenu()}
+        `;
+    }
+
+    renderGroupManagement() {
+        if (!this.hass) return html``;
+
+        return html`
+            <div class="group-management-row">
+                <ha-textfield
+                    .value=${this._newGroupName}
+                    label="New group"
+                    @input=${(e: InputEvent) => {
+                        this._newGroupName = (e.target as HTMLInputElement).value;
+                    }}
+                ></ha-textfield>
+                <ha-button @click=${this._handleCreateGroupClick}>Create</ha-button>
+            </div>
+
+            <div class="group-management-row">
+                <ha-select
+                    .label=${"Rename group"}
+                    .value=${this._renameGroupFrom}
+                    .naturalMenuWidth=${true}
+                    @selected=${(e: Event) => {
+                        const value = (e.target as any).value;
+                        this._renameGroupFrom = value || "";
+                        if (!this._renameGroupTo) {
+                            this._renameGroupTo = this._renameGroupFrom;
+                        }
+                    }}
+                >
+                    ${this._groupValues.map(
+                        (groupId) => html`<mwc-list-item .value=${groupId}>${groupId}</mwc-list-item>`
+                    )}
+                </ha-select>
+
+                <ha-textfield
+                    .value=${this._renameGroupTo}
+                    label="New name"
+                    @input=${(e: InputEvent) => {
+                        this._renameGroupTo = (e.target as HTMLInputElement).value;
+                    }}
+                ></ha-textfield>
+                <ha-button @click=${this._handleRenameGroupClick}>Rename</ha-button>
+            </div>
+
+            <div class="group-list">
+                ${this._groupValues.length === 0
+                ? html`<span class="secondary">No custom groups yet.</span>`
+                : this._groupValues.map(
+                    (groupId) => html`
+                            <div class="group-list-row">
+                                <span>${groupId}</span>
+                                <ha-icon-button
+                                    .path=${mdiDelete}
+                                    label="Delete group"
+                                    @click=${() => this._handleDeleteGroupClick(groupId)}
+                                ></ha-icon-button>
+                            </div>
+                        `
+                )}
+            </div>
         `;
     }
 
@@ -483,17 +639,27 @@ export class HomeMaintenancePanel extends LitElement {
 
         return html`
             <div class="table-wrapper">
-                <ha-data-table
-                    .hass=${this.hass}
-                    .columns=${this._columnsToDisplay}
-                    .data=${this._rows}
-                    .narrow=${this.narrow}
-                    auto-height
-                    id="tasks-table"
-                    class="tasks-table"
-                    clickable
-                >
-                </ha-data-table>
+                ${this._taskGroups.map(
+                    (group) => html`
+                        <div class="group-section">
+                            <div class="group-header">
+                                <span class="group-title">${group.title}</span>
+                                <span class="group-count">${group.tasks.length}</span>
+                            </div>
+
+                            <ha-data-table
+                                .hass=${this.hass}
+                                .columns=${this._columnsToDisplay}
+                                .data=${this._rowsForTasks(group.tasks)}
+                                .narrow=${this.narrow}
+                                auto-height
+                                class="tasks-table"
+                                clickable
+                            >
+                            </ha-data-table>
+                        </div>
+                    `
+                )}
             </div>
         `;
     }
@@ -553,12 +719,61 @@ export class HomeMaintenancePanel extends LitElement {
                     <ha-svg-icon slot="start" path=${mdiDelete}></ha-svg-icon>
                     ${localize('panel.cards.current.actions.remove', this.hass!.language)}
                 </ha-md-menu-item>
+                <ha-md-menu-item
+                    @click=${() => {
+                if (this._selectedTaskId) {
+                    const task = this.tasks.find((t) => t.id === this._selectedTaskId);
+                    this._movingTaskId = this._selectedTaskId;
+                    this._moveTargetGroupId = task?.group_id ?? "";
+                }
+            }}
+                >
+                    <ha-svg-icon slot="start" path=${mdiFolderMove}></ha-svg-icon>
+                    Move to group
+                </ha-md-menu-item>
             </ha-md-menu>
         `;
     }
 
+    renderMoveDialog() {
+        if (!this.hass || !this._movingTaskId) return html``;
+
+        const task = this.tasks.find((entry) => entry.id === this._movingTaskId);
+
+        return html`
+            <ha-dialog
+                open
+                heading=${`Move task: ${task?.title ?? this._movingTaskId}`}
+                @closed=${() => {
+                    this._movingTaskId = null;
+                }}
+            >
+                <ha-select
+                    .label=${"Target group"}
+                    .value=${this._moveTargetGroupId}
+                    .naturalMenuWidth=${true}
+                    @selected=${(e: Event) => {
+                        const value = (e.target as any).value;
+                        this._moveTargetGroupId = value || "";
+                    }}
+                >
+                    ${this._groupOptions.map(
+                        (option) => html`<mwc-list-item .value=${option.value}>${option.label}</mwc-list-item>`
+                    )}
+                </ha-select>
+
+                <ha-button appearance="plain" slot="secondaryAction" @click=${() => (this._movingTaskId = null)}>
+                    Cancel
+                </ha-button>
+                <ha-button appearance="accent" slot="primaryAction" @click=${this._handleConfirmMoveGroupClick}>
+                    Move
+                </ha-button>
+            </ha-dialog>
+        `;
+    }
+
     private async _handleAddTaskClick() {
-        const { title, interval_value, interval_type, last_performed, tag, icon, label } = this._formData;
+        const { title, interval_value, interval_type, last_performed, tag, icon, label, group_id } = this._formData;
 
         if (!title?.trim() || !interval_value || !interval_type) {
             const msg = localize("panel.cards.new.alerts.required", this.hass!.language);
@@ -574,6 +789,7 @@ export class HomeMaintenancePanel extends LitElement {
             tag_id: tag?.trim() || undefined,
             icon: icon?.trim() || "mdi:calendar-check",
             labels: label ?? [],
+            group_id: group_id?.trim() || null,
         };
 
         try {
@@ -657,6 +873,7 @@ export class HomeMaintenancePanel extends LitElement {
                 icon: task.icon ?? "",
                 label: labels.map((l) => l.label_id),
                 tag: task.tag_id ?? "",
+                group_id: task.group_id ?? "",
             };
 
             await this.updateComplete;
@@ -678,6 +895,7 @@ export class HomeMaintenancePanel extends LitElement {
             last_performed: lastPerformedISO,
             icon: this._editFormData.icon?.trim() || "mdi:calendar-check",
             labels: this._editFormData.label,
+            group_id: this._editFormData.group_id?.trim() || null,
         };
 
         if (this._editFormData.tag && this._editFormData.tag.trim() !== "") {
@@ -725,6 +943,63 @@ export class HomeMaintenancePanel extends LitElement {
 
     private _handleEditFormValueChanged(ev: CustomEvent) {
         this._editFormData = { ...this._editFormData, ...ev.detail.value };
+    }
+
+    private async _handleCreateGroupClick() {
+        const groupId = this._newGroupName.trim();
+        if (!groupId) return;
+
+        try {
+            await createGroup(this.hass!, groupId);
+            this._newGroupName = "";
+            await this.loadData();
+        } catch (e) {
+            console.error("Failed to create group:", e);
+        }
+    }
+
+    private async _handleRenameGroupClick() {
+        const oldGroup = this._renameGroupFrom.trim();
+        const newGroup = this._renameGroupTo.trim();
+        if (!oldGroup || !newGroup) return;
+
+        try {
+            await renameGroup(this.hass!, oldGroup, newGroup);
+            this._renameGroupFrom = "";
+            this._renameGroupTo = "";
+            await this.loadData();
+        } catch (e) {
+            console.error("Failed to rename group:", e);
+        }
+    }
+
+    private async _handleDeleteGroupClick(groupId: string) {
+        const confirmed = confirm(`Delete group '${groupId}'? Tasks will move to Ungrouped.`);
+        if (!confirmed) return;
+
+        try {
+            await deleteGroup(this.hass!, groupId);
+            await this.loadData();
+        } catch (e) {
+            console.error("Failed to delete group:", e);
+        }
+    }
+
+    private async _handleConfirmMoveGroupClick() {
+        if (!this._movingTaskId) return;
+
+        try {
+            await updateTask(this.hass!, {
+                task_id: this._movingTaskId,
+                updates: {
+                    group_id: this._moveTargetGroupId?.trim() || null,
+                },
+            });
+            this._movingTaskId = null;
+            await this.loadData();
+        } catch (e) {
+            console.error("Failed to move task group:", e);
+        }
     }
 
     private _handleShowMenu(taskId: string, ev: Event) {
